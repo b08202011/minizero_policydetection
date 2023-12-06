@@ -30,7 +30,7 @@ Outline
 
 ## Overview
 
-MiniZero utilizes zero-knowledge learning algorithms to train game-specific AI models.
+MiniZero utilizes zero-knowledge learning algorithms to train game-specific AI models
 
 It includes a variety of zero-knowledge learning algorithms:
 * AlphaZero
