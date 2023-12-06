@@ -99,18 +99,7 @@ This is an implementation choice; a simpler file system can suffice if distribut
 
 </details>
 
-### Results
 
-The performance of each zero-knowledge learning algorithm on board games and Atari games are shown as follows, where α<sub>0</sub>, μ<sub>0</sub>, g-α<sub>0</sub>, and g-μ<sub>0</sub> represent AlphaZero, MuZero, Gumbel AlphaZero, and Gumbel MuZero, and $n$ represents simulation count.
-More details and publicly released AI models are available [here](https://rlg.iis.sinica.edu.tw/papers/minizero).
-
-Results on board games:
-
-<img src="docs/imgs/minizero_go_9x9.svg" alt="Go 9x9" width="50%"><img src="docs/imgs/minizero_othello_8x8.svg" alt="Othello 8x8" width="50%">
-
-Results on Atari games:
-
-<img src="docs/imgs/minizero_atari.svg" alt="Atari" width="100%">
 
 ### Prerequisites
 
@@ -148,10 +137,8 @@ This section walks you through training AI models using zero-knowledge learning 
 
 First, clone this repository.
 
-```bash
-git clone git@github.com:rlglab/minizero.git
-cd minizero # enter the cloned repository
-```
+put the training csv file to csv_to_trainvalsgf.py
+put the testing csv file to csv_to_sgf.py
 
 Then, start the runtime environment using the container. 
 
@@ -164,65 +151,20 @@ You must execute all of the following commands inside the container.
 
 ### Training
 
-To train 9x9 Go:
+To train policy:
 ```bash
-# AlphaZero with 200 simulations
-tools/quick-run.sh train go az 300 -n go_9x9_az_n200 -conf_str env_board_size=9:actor_num_simulation=200
-
-# Gumbel AlphaZero with 16 simulations
-tools/quick-run.sh train go gaz 300 -n go_9x9_gaz_n16 -conf_str env_board_size=9:actor_num_simulation=16
+trainpolicy.sh   #need to assign traindir(must exist a directory name model inside it) training config(can use example.cfg) training.sgf validation .sgf 
+trainkyupolicy.sh
 ```
-
-To train Ms. Pac-Man:
-```bash
-# MuZero with 50 simulations
-tools/quick-run.sh train atari mz 300 -n ms_pacman_mz_n50 -conf_str env_atari_name=ms_pacman:actor_num_simulation=50
-
-# Gumbel MuZero with 18 simulations
-tools/quick-run.sh train atari gmz 300 -n ms_pacman_gmz_n18 -conf_str env_atari_name=ms_pacman:actor_num_simulation=18
-```
-
-For more training details, please refer to [this instructions](docs/Training.md).
 
 ### Evaluation
 
-To evaluate the strength growth during training:
+To evaluate :
 ```bash
-# the strength growth for "go_9x9_az_n200"
-tools/quick-run.sh self-eval go go_9x9_az_n200 -conf_str env_board_size=9:actor_num_simulation=800:actor_select_action_by_count=true:actor_select_action_by_softmax_count=false:actor_use_dirichlet_noise=false:actor_use_gumbel_noise=false
+eval.sh #need assign cfg(example.cfg) testing sgf
+        # need to modify the load model in policy_play.py policy_playkyu.py policy_playkyuprivate.py policy_playpri.py
+        ＃need to have a submission templete
 ```
-
-To compare the strengths between two trained AI models:
-```bash
-# the relative strengths between "go_9x9_az_n200" and "go_9x9_gaz_n16"
-tools/quick-run.sh fight-eval go go_9x9_az_n200 go_9x9_gaz_n16 -conf_str env_board_size=9:actor_num_simulation=800:actor_select_action_by_count=true:actor_select_action_by_softmax_count=false:actor_use_dirichlet_noise=false:actor_use_gumbel_noise=false
-```
-
-Note that the evaluations is generated during training in Atari games.
-Check `ms_pacman_mz_n50/analysis/*_Return.png` for the results.
-
-For more evaluation details, please refer to [this instructions](docs/Evaluation.md).
-
-### Console
-
-To interact with a trained model using [Go Text Protocol (GTP)](http://www.lysator.liu.se/~gunnar/gtp/).
-```bash
-# play with the "go_9x9_az_n200" model
-tools/quick-run.sh console go go_9x9_az_n200 -conf_str env_board_size=9:actor_num_simulation=800:actor_select_action_by_count=true:actor_select_action_by_softmax_count=false:actor_use_dirichlet_noise=false:actor_use_gumbel_noise=false
-```
-
-For more console details, please refer to [this instructions](docs/Console.md).
-
-## Development
-
-We are actively adding new algorithms, features, and games into MiniZero.
-
-The following work-in-progress features will be available in future versions:
-* Stochastic MuZero
-* Sampled MuZero
-
-We welcome developers to join the MiniZero community. 
-For more development tips, please refer to [this instructions](docs/Development.md).
 
 ## References
 - [MiniZero: Comparative Analysis of AlphaZero and MuZero on Go, Othello, and Atari Games](https://arxiv.org/abs/2310.11305)
