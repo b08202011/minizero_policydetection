@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <fstream>
 #include <utility>
+#include <iostream>
 
 namespace minizero::learner {
 
@@ -19,11 +20,13 @@ ReplayBuffer::ReplayBuffer()
     game_priorities_.clear();
     position_priorities_.clear();
     env_loaders_.clear();
+    game_counter_ = 0;
 }
 
 void ReplayBuffer::addData(const EnvironmentLoader& env_loader)
 {
     std::pair<int, int> data_range = env_loader.getDataRange();
+    //std::cout<<data_range<<std::endl;
     std::deque<float> position_priorities(data_range.second + 1, 0.0f);
     float game_priority = 0.0f;
     for (int i = data_range.first; i <= data_range.second; ++i) {
@@ -52,15 +55,28 @@ void ReplayBuffer::addData(const EnvironmentLoader& env_loader)
 
 std::pair<int, int> ReplayBuffer::sampleEnvAndPos()
 {
+    //std::lock_guard<std::mutex> lock(mutex_);
+    //int env_id =0;
     int env_id = sampleIndex(game_priorities_);
+    //std::cout<<position_priorities_[game_counter_].size()<<std::endl;
     int pos_id = sampleIndex(position_priorities_[env_id]);
+    //int pos_id = position_priorities_[env_id].size()-1;
+    //std::cout<< game_counter_<<std::endl;
+    //std::cout<< pos_id<<std::endl; 
     return {env_id, pos_id};
 }
 
 int ReplayBuffer::sampleIndex(const std::deque<float>& weight)
 {
     std::discrete_distribution<> dis(weight.begin(), weight.end());
+    //std::lock_guard<std::mutex> lock(mutex_);
+    //int temp =game_counter_;
+
+    //game_counter_+=1;
+    //game_counter_=game_counter_%game_priorities_.size();
+    //std::cout<<game_priorities_.size()<<std::endl;
     return dis(Random::generator_);
+    //return temp;
 }
 
 float ReplayBuffer::getLossScale(const std::pair<int, int>& p)
@@ -79,8 +95,10 @@ std::string DataLoaderSharedData::getNextEnvString()
     std::string env_string = "";
     if (!env_strings_.empty()) {
         env_string = env_strings_.front();
+        //std::cout<< env_string <<std::endl;
         env_strings_.pop_front();
     }
+    
     return env_string;
 }
 
@@ -89,6 +107,7 @@ int DataLoaderSharedData::getNextBatchIndex()
     std::lock_guard<std::mutex> lock(mutex_);
     return (batch_index_ < config::learner_batch_size ? batch_index_++ : config::learner_batch_size);
 }
+
 
 void DataLoaderThread::initialize()
 {
@@ -109,14 +128,26 @@ bool DataLoaderThread::addEnvironmentLoader()
 {
     std::string env_string = getSharedData()->getNextEnvString();
     if (env_string.empty()) { return false; }
-
+    //todo  modify envloader
+    minizero::utils::SGFLoader sgf_loader;
+    if (!sgf_loader.loadFromString(env_string)) { return true; }
+    if (std::stoi(sgf_loader.getTags().at("SZ")) != 19) { return true; }
+    
     EnvironmentLoader env_loader;
-    if (env_loader.loadFromString(env_string)) { getSharedData()->replay_buffer_.addData(env_loader); }
+    env_loader.addTag("SZ", sgf_loader.getTags().at("SZ"));
+    env_loader.addTag("PB", sgf_loader.getTags().at("PB"));
+    env_loader.addTag("PW", sgf_loader.getTags().at("PW"));
+    for (auto& action_string : sgf_loader.getActions()) {
+        env_loader.addActionPair(Action(action_string.first, std::stoi(sgf_loader.getTags().at("SZ"))), action_string.second);
+    }
+    getSharedData()->replay_buffer_.addData(env_loader);
+
     return true;
 }
 
 bool DataLoaderThread::sampleData()
-{
+{   
+    //std::lock_guard<std::mutex> lock(mutex_); 
     int batch_index = getSharedData()->getNextBatchIndex();
     if (batch_index >= config::learner_batch_size) { return false; }
 
@@ -133,25 +164,73 @@ bool DataLoaderThread::sampleData()
 
 void DataLoaderThread::setAlphaZeroTrainingData(int batch_index)
 {
+    
     // random pickup one position
-    std::pair<int, int> p = getSharedData()->replay_buffer_.sampleEnvAndPos();
-    int env_id = p.first, pos = p.second;
+    std::pair<int, int> p;
+    int env_id,pos;
+    EnvironmentLoader env_loader;
+    std::string PB_name,PW_name,player_name;
+    while(true){
+        int player_game_number = config::learner_batch_size/3;
+        p = getSharedData()->replay_buffer_.sampleEnvAndPos();
+        env_id = p.first, pos = p.second;
+        env_loader = getSharedData()->replay_buffer_.env_loaders_[env_id];
+        PB_name = env_loader.getTag("PB");
+        PW_name = env_loader.getTag("PW");
+        player_name = !PB_name.empty()? PB_name : PW_name;
+        if((stoi(player_name)-1)%3 == batch_index/player_game_number ){break;}
+        //std::cout<<"sample"<<std::endl;
+    }
 
-    // AlphaZero training data
-    const EnvironmentLoader& env_loader = getSharedData()->replay_buffer_.env_loaders_[env_id];
+    int move_counts = env_loader.getActionPairs().size();
+    //std::cout<<move_counts<<std::endl;
+    pos = move_counts-1;
+    p.second =pos;
+    
     Rotation rotation = static_cast<Rotation>(Random::randInt() % static_cast<int>(Rotation::kRotateSize));
+    
     float loss_scale = getSharedData()->replay_buffer_.getLossScale(p);
+    std::vector<float> zerovector(362,0);
     std::vector<float> features = env_loader.getFeatures(pos, rotation);
-    std::vector<float> policy = env_loader.getPolicy(pos, rotation);
-    std::vector<float> value = env_loader.getValue(pos);
-
+    std::vector<float> features2 = pos>1? env_loader.getFeatures(pos-1, rotation) : zerovector;
+    std::vector<float> features3 = pos>2? env_loader.getFeatures(pos-2, rotation) : zerovector;
+    features.insert(features.end(),features2.begin(),features2.end());
+    features.insert(features.end(),features3.begin(),features3.end());
+    //std::vector<float> policy = env_loader.getPolicy(pos, rotation);
+    //std::cout<<"done"<<std::endl;
+    //std::vector<float> value = env_loader.getValue(pos);
+    
+    //add player name
+    
+    std::vector<float> player;
+    //std::cout<<player_name<<std::endl;
+    switch (std::stoi(player_name))
+    {
+        case 1:
+            //std::cout<<std::stoi(player_name)<<std::endl;
+            player = {1,0,0};
+            break;
+        case 2:
+            //std::cout<<std::stoi(player_name)<<std::endl;
+            player = {0,1,0};
+            break;
+        case 3:
+            //std::cout<<std::stoi(player_name)<<std::endl;
+            player = {0,0,1};
+            break;    
+        default:
+            break; 
+    }
+    //std::cout<<player[0]<<player[1]<<player[2]<<std::endl;
     // write data to data_ptr
     getSharedData()->getDataPtr()->loss_scale_[batch_index] = loss_scale;
     getSharedData()->getDataPtr()->sampled_index_[2 * batch_index] = p.first;
     getSharedData()->getDataPtr()->sampled_index_[2 * batch_index + 1] = p.second;
     std::copy(features.begin(), features.end(), getSharedData()->getDataPtr()->features_ + features.size() * batch_index);
-    std::copy(policy.begin(), policy.end(), getSharedData()->getDataPtr()->policy_ + policy.size() * batch_index);
-    std::copy(value.begin(), value.end(), getSharedData()->getDataPtr()->value_ + value.size() * batch_index);
+    //std::copy(policy.begin(), policy.end(), getSharedData()->getDataPtr()->policy_ + policy.size() * batch_index);
+    //std::copy(value.begin(), value.end(), getSharedData()->getDataPtr()->value_ + value.size() * batch_index);
+    std::copy(player.begin(), player.end(), getSharedData()->getDataPtr()->player_name_ + player.size() * batch_index); 
+    //add player name
 }
 
 void DataLoaderThread::setMuZeroTrainingData(int batch_index)
@@ -252,4 +331,82 @@ void DataLoader::updatePriority(int* sampled_index, float* batch_values)
     getSharedData()->replay_buffer_.game_priority_sum_ = std::accumulate(getSharedData()->replay_buffer_.game_priorities_.begin(), getSharedData()->replay_buffer_.game_priorities_.end(), 0.0f);
 }
 
-} // namespace minizero::learner
+
+TestDataLoader::TestDataLoader(std::string conf_file)
+{
+    minizero::config::ConfigureLoader cl;
+    minizero::config::setConfiguration(cl);
+    cl.loadFromFile(conf_file);
+    minizero::env::setUpEnv();
+    env_loaders_.clear();
+}
+void TestDataLoader::loadTestDataFromFile(const std::string& file_name)
+{
+    std::cerr << "Read " << file_name << "..." << std::endl;
+    std::ifstream fin(file_name, std::ifstream::in);
+    
+    for (std::string content; std::getline(fin, content);) {
+        minizero::utils::SGFLoader sgf_loader;
+        if (!sgf_loader.loadFromString(content)) { continue; }
+        if (std::stoi(sgf_loader.getTags().at("SZ")) != 19) { continue; }
+
+        EnvironmentLoader env_loader;
+        env_loader.reset();
+        env_loader.addTag("SZ", sgf_loader.getTags().at("SZ"));
+        //env_loader.addTag("KM", sgf_loader.getTags().at("KM"));
+        //env_loader.addTag("PB", sgf_loader.getTags().at("PB"));
+        //env_loader.addTag("PW", sgf_loader.getTags().at("PW"));
+        //env_loader.addTag("BR", sgf_loader.getTags().at("BR"));
+        //env_loader.addTag("WR", sgf_loader.getTags().at("WR"));
+        for (auto& action_string : sgf_loader.getActions()) {
+            env_loader.addActionPair(Action(action_string.first, std::stoi(sgf_loader.getTags().at("SZ"))), action_string.second);
+        }
+        //std::cerr<<"add data"<<std::endl;
+        //std::string PB_name = env_loader.getTag("PB");
+        //std::string PW_name = env_loader.getTag("PW");
+        //std::cerr <<PB_name <<PW_name<<std::endl;
+        
+        env_loaders_.push_back(env_loader);
+        //std::cerr<<env_loaders_.size() <<std::endl;
+        //} else if (player_name == PW_name){
+        
+    }
+}
+std::vector<float> TestDataLoader::calculateGameFeatures(int game_id)
+{
+    std::vector<float>  zerovector(18*19*19, 0);
+    std::vector<float> features_;
+    std::vector<float> features2_ = zerovector;
+    std::vector<float> features3_ = zerovector; 
+    std::vector<float> game_features_;
+    
+    game_features_.clear();
+ 
+    env_.reset();
+
+    int move_counts = env_loaders_[game_id].getActionPairs().size();
+    //std::string PB_name = env_loaders_[player][game_id].getTag("PB");
+    //minizero::env::Player color = !PB_name.empty() ? minizero::env::Player::kPlayer1 : minizero::env::Player::kPlayer2;
+  
+    for (int i = 0; i < move_counts; ++i) {
+        const Action& action = env_loaders_[game_id].getActionPairs()[i].first;
+        env_.act(action);
+        
+        if (i ==  move_counts-2){features2_ = env_.getFeatures();}
+        if (i ==  move_counts-3){features3_ = env_.getFeatures();} 
+        if (i ==  move_counts-1) {
+            features_ = env_.getFeatures(); // (1,18*19*19)
+            features_.insert(features_.end(),features2_.begin(),features2_.end());
+            features_.insert(features_.end(),features3_.begin(),features3_.end());
+            for (size_t j = 0; j < features_.size(); j++) {
+                game_features_.push_back(features_[j]); // (n_frames,18*19*19)
+            }
+                
+        }
+    }
+    
+
+    return game_features_;
+}
+}
+ // namespace minizero::learner

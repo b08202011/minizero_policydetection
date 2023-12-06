@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include<iostream>
 
 namespace minizero::learner {
 
@@ -29,6 +30,8 @@ public:
     float* reward_;
     float* loss_scale_;
     int* sampled_index_;
+    float* player_name_; 
+    // add player name
 };
 
 class ReplayBuffer {
@@ -37,6 +40,7 @@ public:
 
     std::mutex mutex_;
     int num_data_;
+    int game_counter_;
     float game_priority_sum_;
     std::deque<float> game_priorities_;
     std::deque<std::deque<float>> position_priorities_;
@@ -67,7 +71,7 @@ class DataLoaderThread : public utils::BaseSlaveThread {
 public:
     DataLoaderThread(int id, std::shared_ptr<utils::BaseSharedData> shared_data)
         : BaseSlaveThread(id, shared_data) {}
-
+    std::mutex mutex_;
     void initialize() override;
     void runJob() override;
     bool isDone() override { return false; }
@@ -96,5 +100,19 @@ public:
     std::shared_ptr<utils::BaseSlaveThread> newSlaveThread(int id) override { return std::make_shared<DataLoaderThread>(id, shared_data_); }
     inline std::shared_ptr<DataLoaderSharedData> getSharedData() { return std::static_pointer_cast<DataLoaderSharedData>(shared_data_); }
 };
+class TestDataLoader{  
+    public:
+        TestDataLoader(std::string conf_file);
 
+        
+        void loadTestDataFromFile(const std::string& file_name);
+        int getenvloadersize() {
+            //std::cout<<env_loaders_.size()<<std::endl;
+            return env_loaders_.size();}
+        std::vector<float> calculateGameFeatures(int game_id); 
+    private:
+        Environment env_;
+        
+        std::vector<EnvironmentLoader> env_loaders_;
+};
 } // namespace minizero::learner
