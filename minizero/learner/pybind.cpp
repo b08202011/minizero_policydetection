@@ -77,7 +77,33 @@ PYBIND11_MODULE(minizero_py, m)
                 data_loader.getSharedData()->getDataPtr()->reward_ = static_cast<float*>(reward.request().ptr);
                 data_loader.getSharedData()->getDataPtr()->loss_scale_ = static_cast<float*>(loss_scale.request().ptr);
                 data_loader.getSharedData()->getDataPtr()->sampled_index_ = static_cast<int*>(sampled_index.request().ptr);
+                //add player name  
                 data_loader.sampleData();
             },
             py::call_guard<py::gil_scoped_release>());
+    py::class_<learner::TestDataLoader>(m, "TestDataLoader")
+        .def(py::init<std::string>())
+        .def("load_test_data_from_file", &learner::TestDataLoader::loadTestDataFromFile)
+        
+        .def("get_game_feature",&learner::TestDataLoader::calculateGameFeatures)
+        .def("get_loader_size",&learner::TestDataLoader::getenvloadersize);
+
+    py::class_<Environment>(m, "Env")
+        .def(py::init<>())
+        .def("reset", &Environment::reset)
+        .def("act", py::overload_cast<const Action&>(&Environment::act))
+        .def("act", py::overload_cast<const std::vector<std::string>&>(&Environment::act))
+        .def("get_legal_actions", &Environment::getLegalActions)
+        .def("is_legal_action", &Environment::isLegalAction)
+        .def("is_terminal", &Environment::isTerminal)
+        .def("get_eval_score", &Environment::getEvalScore)
+        .def("get_features", [](Environment& env) { return py::cast(env.getFeatures()); })
+        .def("get_action_features", &Environment::getActionFeatures)
+        .def("to_string", &Environment::toString)
+        .def("name", &Environment::name)
+        .def("get_turn", &Environment::getTurn)
+        .def("get_action_history", &Environment::getActionHistory);
+
+
+
 }
